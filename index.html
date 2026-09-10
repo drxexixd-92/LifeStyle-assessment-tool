@@ -167,6 +167,9 @@ table.vs td.pill{font-weight:600}
   background:var(--navy);color:#fff;text-transform:uppercase;letter-spacing:.4px}
 .pillar .ph .prio.p2{background:var(--blue)}
 .pillar .ph .prio.p3{background:var(--muted)}
+.pillar .ph .prio.pmaint{background:var(--ok)}
+.pillar .pb .goal.goal-maint{background:#EAF2F8;border-left-color:var(--blue)}
+.pillar .pb .goal.goal-maint b{color:var(--blue)}
 .pillar .pb{padding:12px 14px;font-size:13px}
 .pillar .pb .goal{background:var(--ok-bg);border-left:3px solid var(--ok);padding:8px 11px;border-radius:0 8px 8px 0;
   margin-bottom:10px;font-size:13px}
@@ -309,6 +312,8 @@ table.ar-ident td.v{font-weight:700;color:var(--navy);width:34%}
 /* running footer for filed copies */
 .print-foot{display:none;margin-top:10px;padding-top:8px;border-top:1px solid var(--line);
   font-size:10.5px;color:var(--muted);text-align:center}
+.print-foot .pf-disc{display:block;margin-bottom:6px;padding-bottom:6px;border-bottom:1px dashed var(--line);
+  font-size:9.8px;line-height:1.45;color:#6b7885}
 </style>
 </head>
 <body>
@@ -385,9 +390,13 @@ table.ar-ident td.v{font-weight:700;color:var(--navy);width:34%}
 
   <!-- 4. Chronic conditions -->
   <div class="card">
-    <h2><span class="num">5</span> Chronic Conditions</h2>
+    <h2><span class="num">5</span> Chronic Conditions &amp; Medications</h2>
     <div class="body">
       <div class="chips" id="condChips"></div>
+      <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line)">
+        <div class="hint" style="margin-bottom:8px"><b>Current medications</b> &mdash; needed to flag interactions with intensive lifestyle change.</div>
+        <div class="chips" id="medChips"></div>
+      </div>
     </div>
   </div>
 
@@ -573,6 +582,17 @@ const CONDITIONS = [
   ["metsyn","Metabolic syndrome"],["mh","Depression / anxiety"]
 ];
 
+const MEDICATIONS = [
+  ["insulin","Insulin"],
+  ["su","Sulfonylurea (gliclazide, glibenclamide…)"],
+  ["othergluc","Other glucose-lowering (metformin, SGLT2i, GLP-1…)"],
+  ["antihtn","Antihypertensive(s)"],
+  ["statin","Statin / lipid-lowering"],
+  ["anticoag","Anticoagulant / antiplatelet"],
+  ["psych","Psychotropic (antidepressant, anxiolytic…)"],
+  ["none","No regular medications"]
+];
+
 const FREQ4 = [["0","Not at all"],["1","Several days"],["2","More than half"],["3","Nearly every day"]];
 const PHQ_ITEMS = [
   "Little interest or pleasure in doing things",
@@ -626,6 +646,7 @@ function buildChips(where,arr,cls){
 }
 buildChips("ccChips",COMPLAINTS,"cc");
 buildChips("condChips",CONDITIONS);
+buildChips("medChips",MEDICATIONS);
 
 function buildLikert(container,items,name,optArr,onChange){
   const box=document.getElementById(container);
@@ -868,8 +889,9 @@ function auditCut(sex){ return sex==="male"?4:3; } // female/unspecified -> safe
 function collect(){
   const ccs=[...document.querySelectorAll("#ccChips input:checked")].map(x=>x.value);
   const conds=[...document.querySelectorAll("#condChips input:checked")].map(x=>x.value);
+  const meds=[...document.querySelectorAll("#medChips input:checked")].map(x=>x.value);
   return {
-    ccs, ccOther:document.getElementById("ccOther").value.trim(), conds,
+    ccs, ccOther:document.getElementById("ccOther").value.trim(), conds, meds,
     ptName:document.getElementById("ptName").value.trim(),
     ptMRN:document.getElementById("ptMRN").value.trim(),
     ptID:document.getElementById("ptID").value.trim(),
@@ -934,11 +956,24 @@ function assessSleep(d){
   let gap=0,flags=[];
   const any = d.slpHrs!=null||d.slpQual!==""||d.slpIns!=="";
   if(!any) return{status:"na",gap:0,detail:"not assessed"};
-  if(d.slpHrs!=null){if(d.slpHrs<6||d.slpHrs>9){gap+=2;flags.push(d.slpHrs+" h/night");}else if(d.slpHrs<7){gap+=1;flags.push(d.slpHrs+" h/night");}}
+  const hiTarget = (d.age!=null && d.age>=65) ? 8 : 9;
+  if(d.slpHrs!=null){if(d.slpHrs<6||d.slpHrs>hiTarget+1){gap+=2;flags.push(d.slpHrs+" h/night");}else if(d.slpHrs<7||d.slpHrs>hiTarget){gap+=1;flags.push(d.slpHrs+" h/night");}}
   if(d.slpQual==="poor"){gap+=2;flags.push("poor quality");}else if(d.slpQual==="fair"){gap+=1;}
   if(d.slpIns==="yes"){gap+=1;flags.push("insomnia symptoms");}
   const st=gap>=3?"risk":gap>=1?"warn":"ok";
-  return{status:st,gap,detail:flags.length?flags.join(", "):"7–9 h, good quality"};
+  let detail;
+  if(flags.length) detail=flags.join(", ");
+  else {
+    const parts=[];
+    if(d.slpHrs!=null) parts.push(d.slpHrs+" h/night (target 7\u2013"+hiTarget+")");
+    if(d.slpQual==="good") parts.push("good quality");
+    if(d.slpIns==="no") parts.push("no insomnia symptoms");
+    const missing=[];
+    if(d.slpHrs==null) missing.push("hours");
+    if(d.slpQual==="") missing.push("quality");
+    detail = parts.join(", ") + (missing.length?" \u2014 "+missing.join(" & ")+" not assessed":"");
+  }
+  return{status:st,gap,detail};
 }
 function assessStress(d){
   let gap=0,band="—";
@@ -970,6 +1005,16 @@ function assessSocial(d){
   return{status:st,gap,detail:"feels lonely: "+d.social};
 }
 
+// maintenance framing for pillars already at goal
+const MAINTAIN={
+  nutrition:"Maintain the current eating pattern \u2014 keep vegetables, fruit, whole grains and legumes at the centre of meals.",
+  activity:"Maintain the current activity level and keep resistance training in the weekly routine.",
+  sleep:"Maintain the current sleep schedule and wind-down routine.",
+  stress:"Maintain the current coping routine; keep protected time for recovery.",
+  substances:"Stay tobacco-free and keep substance use minimal; anticipate triggers.",
+  social:"Maintain regular, meaningful contact with family, friends or community."
+};
+
 // stage-matched goal framing
 function stageGoal(stage,concrete){
   switch(stage){
@@ -992,15 +1037,28 @@ function rxNutrition(d,diet){
 }
 function rxActivity(d){
   const now=d.pavs||0;
-  const concrete=(now<60?"start with 10-minute brisk walks after meals, 5 days a week.":"add ~10% more minutes each week toward 150 min/week.");
-  return{goal:stageGoal(d.stage,concrete),
-    items:["<b>FITT:</b> Frequency 5 d/wk · Intensity moderate (brisk walk, can talk not sing) · Time build to 30 min/day (150 min/wk) · Type aerobic.",
-      "Add resistance training 2 days/week for all major muscle groups.",
-      "Any activity counts — no minimum bout; break up prolonged sitting.",
-      "Progress gradually; more activity yields more benefit."]};
+  const older = d.age!=null && d.age>=65;
+  const concrete = older
+    ? (now<60?"start with 5\u201310 minute walks twice daily at a comfortable pace, and rise from a chair 5 times each morning."
+            :"add ~5\u201310% more minutes each week, as tolerated, toward 150 min/week.")
+    : (now<60?"start with 10-minute brisk walks after meals, 5 days a week.":"add ~10% more minutes each week toward 150 min/week.");
+  const items = older
+    ? ["<b>FITT (older adult):</b> Frequency 5 d/wk \u00b7 Intensity moderate <i>relative to fitness</i> (able to talk) \u00b7 Time build gradually toward 150 min/wk, accumulated in short bouts \u00b7 Type aerobic.",
+       "<b>Balance training on 3+ days/week</b> (tandem stand, heel-to-toe walking, single-leg stand with support) \u2014 a core recommendation at this age to reduce falls.",
+       "Resistance training 2 days/week, emphasising legs and sit-to-stand strength; start with body weight or light resistance.",
+       "If frail, deconditioned or with chronic conditions: <b>start low, progress slowly</b>, and be as active as ability allows \u2014 any activity is better than none.",
+       "Screen for falls risk and review medications that cause dizziness before increasing intensity.",
+       "Break up prolonged sitting; light activity still counts."]
+    : ["<b>FITT:</b> Frequency 5 d/wk \u00b7 Intensity moderate (brisk walk, can talk not sing) \u00b7 Time build to 30 min/day (150 min/wk) \u00b7 Type aerobic.",
+       "Add resistance training 2 days/week for all major muscle groups.",
+       "Any activity counts \u2014 no minimum bout; break up prolonged sitting.",
+       "Progress gradually; more activity yields more benefit."];
+  return{goal:stageGoal(d.stage,concrete),items};
 }
 function rxSleep(d){
-  const items=["Target 7–9 hours; keep a consistent sleep and wake time (including weekends).",
+  const older = d.age!=null && d.age>=65;
+  const items=[(older?"Target 7\u20138 hours (recommended range for adults 65+); keep a consistent sleep and wake time (including weekends)."
+                    :"Target 7–9 hours; keep a consistent sleep and wake time (including weekends)."),
     "Wind-down routine; dim lights and stop screens 30–60 min before bed.",
     "Keep the bedroom dark, quiet and cool; limit caffeine after midday.",
     "Get morning daylight and daytime activity to strengthen the sleep drive."];
@@ -1109,13 +1167,38 @@ function generateRx(){
   const w={nutrition:0,activity:0,sleep:0,stress:0,substances:0,social:0};
   d.ccs.forEach(c=>{const cw=CC_WEIGHTS[c]||{};for(const k in cw)w[k]+=cw[k];});
   const score={};for(const k in A)score[k]=A[k].gap+ (w[k]||0);
-  const ranked=Object.keys(A).sort((a,b)=>score[b]-score[a]);
+  let ranked=Object.keys(A).sort((a,b)=>score[b]-score[a]);
+  // Severe mental-health findings must lead the plan, regardless of other gaps
+  const mhSevere = (d.phq9item9!=null && d.phq9item9>0)
+                || (d.phq9Relevant && d.phq9Complete && d.phq9>=20)
+                || (d.gad7Relevant && d.gad7Complete && d.gad7>=15);
+  if(mhSevere){ ranked = ["stress"].concat(ranked.filter(k=>k!=="stress")); }
 
   const dietKey=selectDietKey(d.ccs);
   const diet=DIET_DEF[dietKey];
 
   // referral / safety flags
-  const referrals=[],urgent=[];
+  const referrals=[],urgent=[],medCautions=[];
+
+  // ---- Medication safety: intensive lifestyle change can require dose adjustment ----
+  const onInsulin = d.meds.includes("insulin"), onSU = d.meds.includes("su");
+  const onAntiHTN = d.meds.includes("antihtn");
+  if(onInsulin || onSU){
+    medCautions.push("<b>Hypoglycaemia risk:</b> this patient takes "+(onInsulin&&onSU?"insulin and a sulfonylurea":(onInsulin?"insulin":"a sulfonylurea"))+
+      ". Intensive dietary change and increased activity lower glucose quickly \u2014 review and pre-emptively reduce the dose as needed, advise self-monitoring around the change, and counsel on recognising and treating hypoglycaemia.");
+  }
+  if(d.meds.includes("othergluc") && !onInsulin && !onSU){
+    medCautions.push("Glucose-lowering therapy in use \u2014 monitor glycaemia as lifestyle change takes effect; agents such as metformin/SGLT2i/GLP-1 carry lower hypoglycaemia risk but doses may still need review.");
+  }
+  if(onAntiHTN){
+    medCautions.push("<b>Hypotension risk:</b> on antihypertensive therapy. Sodium reduction, weight loss and increased activity can lower blood pressure further \u2014 monitor readings and review the regimen to avoid symptomatic hypotension.");
+  }
+  if(d.meds.includes("anticoag")){
+    medCautions.push("On anticoagulant/antiplatelet therapy \u2014 large sustained changes in vitamin K intake (leafy greens) can affect warfarin control; keep intake consistent and monitor INR if applicable.");
+  }
+  if(d.meds.length===0){
+    medCautions.push("Medications not recorded \u2014 confirm before intensifying lifestyle therapy, particularly glucose- and blood-pressure-lowering agents.");
+  }
   if(d.phq9item9!=null && d.phq9item9>0) urgent.push("PHQ-9 item 9 positive (thoughts of self-harm) — conduct a safety assessment now and arrange urgent mental-health evaluation per local protocol.");
   if(d.phq9Relevant && d.phq9!=null && d.phq9Complete && d.phq9>=10) referrals.push("PHQ-9 = "+d.phq9+" ("+phqBand(d.phq9)[0]+") — refer for depression evaluation/management.");
   if(d.phq9Relevant && d.phq9!=null && !d.phq9Complete) referrals.push("PHQ-2 positive screen — PHQ-9 incomplete ("+d.phq9Answered+"/9 items) — complete the scale before interpreting severity.");
@@ -1180,6 +1263,11 @@ function generateRx(){
   // Safety / referral first if urgent
   if(urgent.length){html+=`<div class="rx-sec"><div class="flagbox flag-urgent"><b>&#9888; Urgent — Safety</b><ul>${urgent.map(x=>`<li>${x}</li>`).join("")}</ul></div></div>`;}
 
+  // Medication safety cautions
+  if(medCautions.length){
+    html+=`<div class="rx-sec"><h3>Medication Safety</h3><div class="flagbox flag-referral"><b>Review before intensifying lifestyle therapy</b><ul>${medCautions.map(x=>`<li>${x}</li>`).join("")}</ul></div></div>`;
+  }
+
   // Vital signs table
   html+=`<div class="rx-sec"><h3>Lifestyle Vital Signs</h3><table class="vs">
     <tr><th>Pillar</th><th>Finding</th><th>Status</th></tr>`;
@@ -1219,14 +1307,22 @@ function generateRx(){
 
   // Prioritized pillar prescription (top pillars)
   html+=`<div class="rx-sec"><h3>Prioritized Lifestyle Prescription</h3>`;
+  if(mhSevere){
+    html+=`<div class="flagbox flag-referral" style="margin-bottom:10px"><b>Mental health prioritised</b>Severe findings on screening place emotional wellbeing first in this plan; address it alongside (not after) the referral above.</div>`;
+  }
   ranked.forEach((k,idx)=>{
     // skip pillars fully at goal with no complaint weight, unless in top 4
     if(score[k]<=0 && idx>=4) return;
     const rx=RX_FN[k](d,diet);
     const prioClass=idx===0?"":idx===1?"p2":"p3";
-    const prioLabel=idx===0?"Priority 1":idx===1?"Priority 2":"Support";
-    html+=`<div class="pillar"><div class="ph"><span class="pi">${PILLAR_META[k][0]}</span><b>${PILLAR_META[k][1]}</b><span class="prio ${prioClass}">${prioLabel}</span></div>
-      <div class="pb"><div class="goal"><b>SMART goal:</b> ${rx.goal}</div><ul>${rx.items.map(i=>`<li>${i}</li>`).join("")}</ul></div></div>`;
+    let prioLabel=idx===0?"Priority 1":idx===1?"Priority 2":"Support";
+    // pillar already at goal -> maintenance framing rather than a corrective goal
+    const atGoal = A[k] && A[k].status==="ok";
+    if(atGoal) prioLabel="Maintain";
+    const goalText = atGoal ? MAINTAIN[k] : rx.goal;
+    const goalLabel = atGoal ? "Maintenance goal" : "SMART goal";
+    html+=`<div class="pillar"><div class="ph"><span class="pi">${PILLAR_META[k][0]}</span><b>${PILLAR_META[k][1]}</b><span class="prio ${prioClass}${atGoal?" pmaint":""}">${prioLabel}</span></div>
+      <div class="pb"><div class="goal${atGoal?" goal-maint":""}"><b>${goalLabel}:</b> ${goalText}</div><ul>${rx.items.map(i=>`<li>${i}</li>`).join("")}</ul></div></div>`;
   });
   html+=`</div>`;
 
@@ -1244,7 +1340,7 @@ function generateRx(){
       <button class="primary noprint" onclick="window.print()" style="margin-right:8px">Print / Save PDF</button>
       <button class="ghost noprint" onclick="showPatientAr()" style="margin-right:8px">نسخة المريض (بالعربي)</button>
       <div class="noprint" style="margin-top:12px;font-size:12px;color:var(--muted)"><b style="color:var(--navy)">Developed and Designed by Dr. Eid Fahid Al-Shammari</b><br>Hail Health Cluster · Family Medicine Academy · Evidence base: ACLM Foundations of Lifestyle Medicine, 4th Ed. (2023)</div>
-      <div class="print-foot">${d.ptName?escapeHtml(d.ptName)+" · ":""}${d.ptMRN?"MRN "+escapeHtml(d.ptMRN)+" · ":""}Consultation ${fmtDate(d.visitDate)} · Lifestyle Prescription — Hail Health Cluster, Family Medicine Academy<br>Developed and Designed by Dr. Eid Fahid Al-Shammari · Evidence base: ACLM Foundations of Lifestyle Medicine, 4th Ed. (2023)</div>
+      <div class="print-foot"><span class="pf-disc">Clinical decision-support output. Intended to assist a qualified clinician; it does not replace clinical judgment, examination, or guideline review. Instruments (PHQ-2/9, GAD-2/7, PSS-4, AUDIT-C, PAVS) use standard published scoring.</span>${d.ptName?escapeHtml(d.ptName)+" · ":""}${d.ptMRN?"MRN "+escapeHtml(d.ptMRN)+" · ":""}Consultation ${fmtDate(d.visitDate)} · Lifestyle Prescription — Hail Health Cluster, Family Medicine Academy<br>Developed and Designed by Dr. Eid Fahid Al-Shammari · Evidence base: ACLM Foundations of Lifestyle Medicine, 4th Ed. (2023)</div>
     </div></div>`;
 
   document.getElementById("rx").innerHTML=html;
